@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-struct VM {
+pub struct VM {
     stack:   Vec<[u8; 32]>,
     pc:      u64,
     gas:     u64,
