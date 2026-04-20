@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-struct VM {
+pub struct VM {
     stack:   Vec<[u8; 32]>,
     pc:      u64,
     gas:     u64,
@@ -47,6 +47,12 @@ impl VM {
                     let a = self.pop()?;
                     let b = self.pop()?;
                     self.push(sub_u256(a,b));
+                }
+                // DIV 
+                0x04 => { 
+                    let a = self.pop()?;
+                    let b = self.pop()?;
+                    self.push(div_u256(a,b));
                 }
 
                 // PUSH1: read next byte, push it as a 32-byte value
@@ -105,6 +111,74 @@ fn sub_u256(a: [u8; 32], b :[u8; 32]) -> [u8; 32] {
     }
 
     result
+}
+
+fn div_u256(a: [u8; 32], b: [u8; 32]) -> [u8; 32] {
+    // EVM spec: division by zero returns zero
+    if b == [0u8; 32] {
+        return [0u8; 32];
+    }
+
+    let to_limbs = |x: [u8; 32]| -> [u64; 8] {
+        let mut limbs = [0u64; 8];
+        for i in 0..8 {
+            limbs[i] = u32::from_be_bytes(x[i*4..(i+1)*4].try_into().unwrap()) as u64;
+        }
+        limbs
+    };
+
+    let from_limbs = |limbs: [u64; 8]| -> [u8; 32] {
+        let mut result = [0u8; 32];
+        for i in 0..8 {
+            result[i*4..(i+1)*4].copy_from_slice(&(limbs[i] as u32).to_be_bytes());
+        }
+        result
+    };
+
+    let cmp_limbs = |x: &[u64; 8], y: &[u64; 8]| -> std::cmp::Ordering {
+        for i in 0..8 { if x[i] != y[i] { return x[i].cmp(&y[i]); } }
+        std::cmp::Ordering::Equal
+    };
+
+    // shift limbs left by one bit
+    let shl1 = |x: &[u64; 8]| -> [u64; 8] {
+        let mut r = [0u64; 8];
+        let mut carry = 0u64;
+        for i in (0..8).rev() {
+            r[i] = ((x[i] << 1) | carry) & 0xFFFF_FFFF;
+            carry = x[i] >> 31;
+        }
+        r
+    };
+
+    // subtract y from x (assumes x >= y)
+    let sub_limbs = |x: &[u64; 8], y: &[u64; 8]| -> [u64; 8] {
+        let mut r = [0u64; 8];
+        let mut borrow = 0i64;
+        for i in (0..8).rev() {
+            let d = x[i] as i64 - y[i] as i64 - borrow;
+            r[i] = (d & 0xFFFF_FFFF) as u64;
+            borrow = if d < 0 { 1 } else { 0 };
+        }
+        r
+    };
+
+    let mut quotient = [0u64; 8];
+    let mut remainder = [0u64; 8];
+    let a_limbs = to_limbs(a);
+
+    // long division bit by bit (256 iterations)
+    for bit in (0..256).rev() {
+        remainder = shl1(&remainder);
+        remainder[7] |= (a_limbs[7 - bit / 32] >> (bit % 32)) & 1;
+        let b_limbs = to_limbs(b);
+        if cmp_limbs(&remainder, &b_limbs) != std::cmp::Ordering::Less {
+            remainder = sub_limbs(&remainder, &b_limbs);
+            quotient[7 - bit / 32] |= 1 << (bit % 32);
+        }
+    }
+
+    from_limbs(quotient)
 }
 
 fn mul_u256(a: [u8; 32], b: [u8; 32]) -> [u8; 32] {
