@@ -1,4 +1,4 @@
-use std::{collections::HashMap, result};
+use std::collections::HashMap;
 
 struct VM {
     stack:   Vec<[u8; 32]>,
@@ -36,10 +36,17 @@ impl VM {
                     self.push(add_u256(a, b));
                 }
 
+                // MUL (same as add but uses mul_256)
                 0x02 => { 
                     let a = self.pop()?;
                     let b = self.pop()?;
                     self.push(mul_u256(a ,b));
+                }
+
+                0x03 =>  {
+                    let a = self.pop()?;
+                    let b = self.pop()?;
+                    self.push(sub_u256(a,b));
                 }
 
                 // PUSH1: read next byte, push it as a 32-byte value
@@ -85,18 +92,45 @@ fn add_u256(a: [u8; 32], b: [u8; 32]) -> [u8; 32] {
     result
 }
 
-fn mul_u256(a: [u8; 32], b: [u8; 32]) -> [u8; 32] { 
-    let mut result =[0u8; 32];
+fn sub_u256(a: [u8; 32], b :[u8; 32]) -> [u8; 32] { 
+    let mut result = [0u8; 32]; 
 
-    let  a_hi  = u128::from_be_bytes(a[0..16].try_into().unwrap());
-    let a_lo  = u128::from_be_bytes(a[16..32].try_into().unwrap());
+    let mut borrow : i16 = 0 ; 
 
-    let b_hi  = u128::from_be_bytes(b[0..16].try_into().unwrap());
-    let b_lo  = u128::from_be_bytes(b[16..32].try_into().unwrap());
+    for i in (0..32).rev() { 
+        let diff = a[i] as i16 - b[i] as i16 - borrow;
+        result[i] = diff as u8;
 
-    let ll = a_lo * b_lo;
-    let hl = (a_hi * b_lo) << 128; 
-    let lh = (b_hi * a_lo) << 128;
-    
+        borrow = diff >>  8;
+    }
+
+    result
+}
+
+fn mul_u256(a: [u8; 32], b: [u8; 32]) -> [u8; 32] {
+    let a_hi = u128::from_be_bytes(a[0..16].try_into().unwrap());
+    let a_lo = u128::from_be_bytes(a[16..32].try_into().unwrap());
+    let b_hi = u128::from_be_bytes(b[0..16].try_into().unwrap());
+    let b_lo = u128::from_be_bytes(b[16..32].try_into().unwrap());
+
+    // a_lo * b_lo produces up to 256 bits — split into hi/lo using 64-bit 
+    let (a0, a1) = (a_lo >> 64, a_lo & u64::MAX as u128);
+    let (b0, b1) = (b_lo >> 64, b_lo & u64::MAX as u128);
+    let p0 = a1 * b1;
+    let p1 = a1 * b0;
+    let p2 = a0 * b1;
+    let p3 = a0 * b0;
+    let mid = (p0 >> 64) + (p1 & u64::MAX as u128) + (p2 & u64::MAX as u128);
+    let ll_lo = (mid << 64) | (p0 & u64::MAX as u128);
+    let ll_hi = p3 + (p1 >> 64) + (p2 >> 64) + (mid >> 64);
+
+    // hl and lh shift left 128, so they go directly into result_hi
+    let result_hi = ll_hi
+        .wrapping_add(a_hi.wrapping_mul(b_lo))
+        .wrapping_add(a_lo.wrapping_mul(b_hi));
+
+    let mut result = [0u8; 32];
+    result[0..16].copy_from_slice(&result_hi.to_be_bytes());
+    result[16..32].copy_from_slice(&ll_lo.to_be_bytes());
     result
 }
