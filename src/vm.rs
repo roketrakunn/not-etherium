@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, result};
 
 struct VM {
     stack:   Vec<[u8; 32]>,
@@ -34,6 +34,12 @@ impl VM {
                     let a = self.pop()?;
                     let b = self.pop()?;
                     self.push(add_u256(a, b));
+                }
+
+                0x02 => { 
+                    let a = self.pop()?;
+                    let b = self.pop()?;
+                    self.push(mul_u256(a ,b));
                 }
 
                 // PUSH1: read next byte, push it as a 32-byte value
@@ -76,5 +82,21 @@ fn add_u256(a: [u8; 32], b: [u8; 32]) -> [u8; 32] {
         result[i] = sum as u8;
         carry = sum >> 8;
     }
+    result
+}
+
+fn mul_u256(a: [u8; 32], b: [u8; 32]) -> [u8; 32] { 
+    let mut result =[0u8; 32];
+
+    let  a_hi  = u128::from_be_bytes(a[0..16].try_into().unwrap());
+    let a_lo  = u128::from_be_bytes(a[16..32].try_into().unwrap());
+
+    let b_hi  = u128::from_be_bytes(b[0..16].try_into().unwrap());
+    let b_lo  = u128::from_be_bytes(b[16..32].try_into().unwrap());
+
+    let ll = a_lo * b_lo;
+    let hl = (a_hi * b_lo) << 128; 
+    let lh = (b_hi * a_lo) << 128;
+    
     result
 }
