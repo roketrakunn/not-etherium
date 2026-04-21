@@ -48,11 +48,38 @@ impl VM {
                     let b = self.pop()?;
                     self.push(sub_u256(a,b));
                 }
-                // DIV 
-                0x04 => { 
+                // DIV
+                0x04 => {
                     let a = self.pop()?;
                     let b = self.pop()?;
                     self.push(div_u256(a,b));
+                }
+
+                // LT: a < b
+                0x10 => {
+                    let a = self.pop()?;
+                    let b = self.pop()?;
+                    self.push(bool_to_u256(cmp_u256(&a, &b) == std::cmp::Ordering::Less));
+                }
+
+                // GT: a > b
+                0x11 => {
+                    let a = self.pop()?;
+                    let b = self.pop()?;
+                    self.push(bool_to_u256(cmp_u256(&a, &b) == std::cmp::Ordering::Greater));
+                }
+
+                // EQ: a == b
+                0x14 => {
+                    let a = self.pop()?;
+                    let b = self.pop()?;
+                    self.push(bool_to_u256(a == b));
+                }
+
+                // ISZERO: a == 0
+                0x15 => {
+                    let a = self.pop()?;
+                    self.push(bool_to_u256(a == [0u8; 32]));
                 }
 
                 // PUSH1: read next byte, push it as a 32-byte value
@@ -179,6 +206,16 @@ fn div_u256(a: [u8; 32], b: [u8; 32]) -> [u8; 32] {
     }
 
     from_limbs(quotient)
+}
+
+fn cmp_u256(a: &[u8; 32], b: &[u8; 32]) -> std::cmp::Ordering {
+    a.cmp(b)
+}
+
+fn bool_to_u256(v: bool) -> [u8; 32] {
+    let mut r = [0u8; 32];
+    r[31] = v as u8;
+    r
 }
 
 fn mul_u256(a: [u8; 32], b: [u8; 32]) -> [u8; 32] {
