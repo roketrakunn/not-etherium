@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, result, u64};
 
 pub struct VM {
     stack:   Vec<[u8; 32]>,
@@ -9,6 +9,15 @@ pub struct VM {
 }
 
 impl VM {
+
+
+    //---- HELPER TO CHECK IF MEM IS ENOUGH-------
+
+    pub fn ensure_memory(&mut self, offset : usize , size : usize) {
+        if self.memory.len() < offset + size{ 
+            self.memory.resize(offset+size, 0u8);
+        }
+    }
 
     pub fn new() -> Self {
         VM {
@@ -93,7 +102,75 @@ impl VM {
                     val[31] = byte;
                     self.push(val);
                 }
+                0x16 => { 
+                    let a = self.pop()?;
+                    let b = self.pop()?;
+                    self.push(and_u256(a, b));
+                }
 
+                0x17 => { 
+                    let a = self.pop()?;
+                    let b = self.pop()?;
+                    self.push(or_u256(a, b));
+                }
+
+                0x18 => { 
+                    let a = self.pop()?;
+                    let b = self.pop()?;
+                    self.push(xor_u256(a, b));
+                }
+
+                0x19 => { 
+                    let a = self.pop()?;
+                    self.push(not_u256(a));
+                }
+
+                // ----- EVM MEMORY SHINANIGANS -----
+
+                //1.MSTORE
+
+                0x52 => { 
+                    let offset = self.pop()?;
+
+                    let offset = u64::from_be_bytes(
+                        offset[24..32].try_into().unwrap()
+                    ) as usize;
+                    
+                    let val = self.pop()?; 
+                    self.ensure_memory(offset,32);
+
+                    self.memory[offset..offset+32].copy_from_slice(&val);
+                }
+
+                0x51 => { 
+
+                    let offset = self.pop()?;
+                    let offset = u64::from_be_bytes(
+                        offset[24..32].try_into().unwrap()
+                    ) as usize;
+
+                    self.ensure_memory(offset, 32);
+                 
+                    let mut result = [0u8; 32]; 
+
+                    result.copy_from_slice(&self.memory[offset..offset+32]);
+
+                    self.push(result);
+                }
+
+                0x53 => { 
+ 
+                    let offset = self.pop()?;
+                    let offset = u64::from_be_bytes(
+                        offset[24..32].try_into().unwrap()
+                    ) as usize;
+
+                    let val = self.pop()?; 
+                    
+                    self.ensure_memory(offset,1);
+                    self.memory[offset] = val[31]
+                  
+                }
                 // POP: discard top of stack
                 0x50 => { self.pop()?; }
 
@@ -141,7 +218,6 @@ fn sub_u256(a: [u8; 32], b :[u8; 32]) -> [u8; 32] {
 }
 
 fn div_u256(a: [u8; 32], b: [u8; 32]) -> [u8; 32] {
-    // EVM spec: division by zero returns zero
     if b == [0u8; 32] {
         return [0u8; 32];
     }
@@ -167,7 +243,6 @@ fn div_u256(a: [u8; 32], b: [u8; 32]) -> [u8; 32] {
         std::cmp::Ordering::Equal
     };
 
-    // shift limbs left by one bit
     let shl1 = |x: &[u64; 8]| -> [u64; 8] {
         let mut r = [0u64; 8];
         let mut carry = 0u64;
@@ -178,7 +253,6 @@ fn div_u256(a: [u8; 32], b: [u8; 32]) -> [u8; 32] {
         r
     };
 
-    // subtract y from x (assumes x >= y)
     let sub_limbs = |x: &[u64; 8], y: &[u64; 8]| -> [u64; 8] {
         let mut r = [0u64; 8];
         let mut borrow = 0i64;
@@ -194,7 +268,6 @@ fn div_u256(a: [u8; 32], b: [u8; 32]) -> [u8; 32] {
     let mut remainder = [0u64; 8];
     let a_limbs = to_limbs(a);
 
-    // long division bit by bit (256 iterations)
     for bit in (0..256).rev() {
         remainder = shl1(&remainder);
         remainder[7] |= (a_limbs[7 - bit / 32] >> (bit % 32)) & 1;
@@ -224,7 +297,6 @@ fn mul_u256(a: [u8; 32], b: [u8; 32]) -> [u8; 32] {
     let b_hi = u128::from_be_bytes(b[0..16].try_into().unwrap());
     let b_lo = u128::from_be_bytes(b[16..32].try_into().unwrap());
 
-    // a_lo * b_lo produces up to 256 bits — split into hi/lo using 64-bit 
     let (a0, a1) = (a_lo >> 64, a_lo & u64::MAX as u128);
     let (b0, b1) = (b_lo >> 64, b_lo & u64::MAX as u128);
     let p0 = a1 * b1;
@@ -235,7 +307,6 @@ fn mul_u256(a: [u8; 32], b: [u8; 32]) -> [u8; 32] {
     let ll_lo = (mid << 64) | (p0 & u64::MAX as u128);
     let ll_hi = p3 + (p1 >> 64) + (p2 >> 64) + (mid >> 64);
 
-    // hl and lh shift left 128, so they go directly into result_hi
     let result_hi = ll_hi
         .wrapping_add(a_hi.wrapping_mul(b_lo))
         .wrapping_add(a_lo.wrapping_mul(b_hi));
@@ -245,3 +316,46 @@ fn mul_u256(a: [u8; 32], b: [u8; 32]) -> [u8; 32] {
     result[16..32].copy_from_slice(&ll_lo.to_be_bytes());
     result
 }
+
+
+//-------------- BITWISE OPS --------
+
+// AND op
+fn and_u256(a: [u8;32 ], b:[u8; 32]) -> [u8; 32] {
+    let mut result = [0u8; 32];
+    for i in 0..32 { 
+        result[i]  = a[i] & b[i]
+    }
+    result
+}
+
+// OR op
+fn or_u256(a: [u8;32 ], b:[u8; 32]) -> [u8; 32] {
+    let mut result = [0u8; 32];
+    for i in 0..32 { 
+        result[i]  = a[i] |  b[i]
+    }
+    result
+}
+
+
+// XOR op
+
+fn xor_u256(a: [u8;32 ], b:[u8; 32]) -> [u8; 32] {
+    let mut result = [0u8; 32];
+    for i in 0..32 { 
+        result[i]  = a[i] ^ b[i]
+    }
+    result
+}
+
+// NOT op
+
+fn not_u256(a: [u8;32 ]) -> [u8; 32] {
+    let mut result = [0u8; 32];
+    for i in 0..32 { 
+        result[i]  = !a[i]
+    }
+    result
+}
+
