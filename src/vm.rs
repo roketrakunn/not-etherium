@@ -1,4 +1,4 @@
-use std::{collections::HashMap, result, u64};
+use std::{collections::HashMap};
 
 pub struct VM {
     stack:   Vec<[u8; 32]>,
@@ -193,6 +193,44 @@ impl VM {
                     self.storage.insert(key, val);
                 }
 
+                //JUMP 
+                // JUMP TO A VALID DESTINATION 
+                // CHECK IF DESTINATION IS VALID.
+                // RETURNS INVALID DEST ERR IF NOT.
+
+                0x56 => { 
+                    let dest = self.pop()?; 
+
+                    let dest = u64::from_be_bytes(dest[24..32].try_into().unwrap());
+                    
+                    if bytecode[dest as usize] == 0x5b { 
+                        self.pc = dest as u64;
+                    }else {
+                        return Err("JUMP: invalid destinaton".into());
+                    }
+                }
+
+                // JUMPI
+                // only jumps if conditon is not equals to zero 
+                // otherwise its the same as JUMP
+                0x57 => { 
+                    let dest = self.pop()?; 
+                    let dest = u64::from_be_bytes(dest[24..32].try_into().unwrap());
+
+                    let cond = self.pop()?;
+
+                    if cond != [0u8; 32] { 
+                        if bytecode[dest as usize] == 0x5b { 
+                            self.pc = dest as u64;
+
+                        } else {
+                            return Err("JUMP: invalid destinaton".into());
+                        }
+                    }
+                }
+
+                0x5b => {}
+            
                 // POP: discard top of stack
                 0x50 => { self.pop()?; }
 
@@ -338,7 +376,6 @@ fn mul_u256(a: [u8; 32], b: [u8; 32]) -> [u8; 32] {
     result[16..32].copy_from_slice(&ll_lo.to_be_bytes());
     result
 }
-
 
 //-------------- BITWISE OPS --------
 
