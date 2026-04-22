@@ -142,6 +142,8 @@ impl VM {
                     self.memory[offset..offset+32].copy_from_slice(&val);
                 }
 
+                //2.MLOAD
+
                 0x51 => { 
 
                     let offset = self.pop()?;
@@ -158,6 +160,10 @@ impl VM {
                     self.push(result);
                 }
 
+                // + MSSTORE8 (store last 8 bits of a val)
+                // + see how its just self.memory[offset] = val[31]
+                // + just yank the last 8 bits 
+
                 0x53 => { 
  
                     let offset = self.pop()?;
@@ -169,8 +175,24 @@ impl VM {
                     
                     self.ensure_memory(offset,1);
                     self.memory[offset] = val[31]
-                  
                 }
+                
+                //-------STORAGEE--------
+
+                //1.SLOAD
+                
+                0x54 => { 
+                    let key = self.pop()?; 
+                    self.push(self.storage.get(&key).copied().unwrap_or([0u8;32]));
+                }
+
+                //2.SSTORE
+                0x55 => { 
+                    let key = self.pop()?; 
+                    let val = self.pop()?; 
+                    self.storage.insert(key, val);
+                }
+
                 // POP: discard top of stack
                 0x50 => { self.pop()?; }
 
