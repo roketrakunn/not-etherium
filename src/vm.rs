@@ -1,4 +1,4 @@
-use std::{collections::HashMap, result};
+use std::{collections::HashMap, result, u64};
 
 pub struct VM {
     stack:   Vec<[u8; 32]>,
@@ -9,6 +9,15 @@ pub struct VM {
 }
 
 impl VM {
+
+
+    //---- HELPER TO CHECK IF MEM IS ENOUGH-------
+
+    pub fn ensure_memory(&mut self, offset : usize , size : usize) {
+        if self.memory.len() < offset + size{ 
+            self.memory.resize(offset+size, 0u8);
+        }
+    }
 
     pub fn new() -> Self {
         VM {
@@ -116,7 +125,52 @@ impl VM {
                     self.push(not_u256(a));
                 }
 
+                // ----- EVM MEMORY SHINANIGANS -----
 
+                //1.MSTORE
+
+                0x52 => { 
+                    let offset = self.pop()?;
+
+                    let offset = u64::from_be_bytes(
+                        offset[24..32].try_into().unwrap()
+                    ) as usize;
+                    
+                    let val = self.pop()?; 
+                    self.ensure_memory(offset,32);
+
+                    self.memory[offset..offset+32].copy_from_slice(&val);
+                }
+
+                0x51 => { 
+
+                    let offset = self.pop()?;
+                    let offset = u64::from_be_bytes(
+                        offset[24..32].try_into().unwrap()
+                    ) as usize;
+
+                    self.ensure_memory(offset, 32);
+                 
+                    let mut result = [0u8; 32]; 
+
+                    result.copy_from_slice(&self.memory[offset..offset+32]);
+
+                    self.push(result);
+                }
+
+                0x53 => { 
+ 
+                    let offset = self.pop()?;
+                    let offset = u64::from_be_bytes(
+                        offset[24..32].try_into().unwrap()
+                    ) as usize;
+
+                    let val = self.pop()?; 
+                    
+                    self.ensure_memory(offset,1);
+                    self.memory[offset] = val[31]
+                  
+                }
                 // POP: discard top of stack
                 0x50 => { self.pop()?; }
 
@@ -304,5 +358,4 @@ fn not_u256(a: [u8;32 ]) -> [u8; 32] {
     }
     result
 }
-
 
