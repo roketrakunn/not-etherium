@@ -1,4 +1,4 @@
-use std::{collections::HashMap, result, u64};
+use std::{collections::HashMap};
 
 pub struct VM {
     stack:   Vec<[u8; 32]>,
@@ -142,6 +142,8 @@ impl VM {
                     self.memory[offset..offset+32].copy_from_slice(&val);
                 }
 
+                //2.MLOAD
+
                 0x51 => { 
 
                     let offset = self.pop()?;
@@ -158,6 +160,10 @@ impl VM {
                     self.push(result);
                 }
 
+                // + MSSTORE8 (store last 8 bits of a val)
+                // + see how its just self.memory[offset] = val[31]
+                // + just yank the last 8 bits 
+
                 0x53 => { 
  
                     let offset = self.pop()?;
@@ -169,8 +175,62 @@ impl VM {
                     
                     self.ensure_memory(offset,1);
                     self.memory[offset] = val[31]
-                  
                 }
+                
+                //-------STORAGEE--------
+
+                //1.SLOAD
+                
+                0x54 => { 
+                    let key = self.pop()?; 
+                    self.push(self.storage.get(&key).copied().unwrap_or([0u8;32]));
+                }
+
+                //2.SSTORE
+                0x55 => { 
+                    let key = self.pop()?; 
+                    let val = self.pop()?; 
+                    self.storage.insert(key, val);
+                }
+
+                //JUMP 
+                // JUMP TO A VALID DESTINATION 
+                // CHECK IF DESTINATION IS VALID.
+                // RETURNS INVALID DEST ERR IF NOT.
+
+                0x56 => { 
+                    let dest = self.pop()?; 
+
+                    let dest = u64::from_be_bytes(dest[24..32].try_into().unwrap());
+                    
+                    if bytecode[dest as usize] == 0x5b { 
+                        self.pc = dest as u64;
+                    }else {
+                        return Err("JUMP: invalid destinaton".into());
+                    }
+                }
+
+                // JUMPI
+                // only jumps if conditon is not equals to zero 
+                // otherwise its the same as JUMP
+                0x57 => { 
+                    let dest = self.pop()?; 
+                    let dest = u64::from_be_bytes(dest[24..32].try_into().unwrap());
+
+                    let cond = self.pop()?;
+
+                    if cond != [0u8; 32] { 
+                        if bytecode[dest as usize] == 0x5b { 
+                            self.pc = dest as u64;
+
+                        } else {
+                            return Err("JUMP: invalid destinaton".into());
+                        }
+                    }
+                }
+
+                0x5b => {}
+            
                 // POP: discard top of stack
                 0x50 => { self.pop()?; }
 
@@ -316,7 +376,6 @@ fn mul_u256(a: [u8; 32], b: [u8; 32]) -> [u8; 32] {
     result[16..32].copy_from_slice(&ll_lo.to_be_bytes());
     result
 }
-
 
 //-------------- BITWISE OPS --------
 
