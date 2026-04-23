@@ -10,7 +10,6 @@ pub struct VM {
 
 impl VM {
 
-
     //---- HELPER TO CHECK IF MEM IS ENOUGH-------
 
     pub fn ensure_memory(&mut self, offset : usize , size : usize) {
@@ -233,6 +232,27 @@ impl VM {
             
                 // POP: discard top of stack
                 0x50 => { self.pop()?; }
+
+                // DUP1-DUP16
+                0x80..=0x8f => {
+                    let n = (opcode - 0x80 + 1) as usize;
+                    let len = self.stack.len();
+                    if len < n {
+                        return Err(format!("DUP{}: stack underflow", n));
+                    }
+                    let val = self.stack[len - n];
+                    self.push(val);
+                }
+
+                // SWAP1-SWAP16
+                0x90..=0x9f => {
+                    let n = (opcode - 0x90 + 1) as usize;
+                    let len = self.stack.len();
+                    if len <= n {
+                        return Err(format!("SWAP{}: stack underflow", n));
+                    }
+                    self.stack.swap(len - 1, len - 1 - n);
+                }
 
                 unknown => return Err(format!("unknown opcode: 0x{:02x}", unknown)),
             }
